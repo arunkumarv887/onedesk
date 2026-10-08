@@ -1,4 +1,5 @@
 import type ExcelJS from "exceljs";
+import { roleForEmail } from "./types";
 import type {
   AppNotification,
   AppUser,
@@ -375,8 +376,7 @@ export class ExcelWorkbookDatabase {
   }
 
   getRole(user: AppUser): UserRole {
-    const member = this.getMembers().find((item) => item.email.toLowerCase() === user.email.toLowerCase());
-    return member?.role === "admin" || member?.role === "agent" ? member.role : "requester";
+    return roleForEmail(user.email);
   }
 
   getTicketClosureCounts(tickets: Ticket[]): { byAdmin: number; byUser: number } {

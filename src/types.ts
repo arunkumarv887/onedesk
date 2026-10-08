@@ -3,6 +3,14 @@ export type TicketPriority = "Low" | "Medium" | "High" | "Urgent";
 export type TicketKind = "Incident" | "Service request";
 export type UserRole = "requester" | "agent" | "admin";
 
+export const ONEDESK_ADMIN_EMAIL = (
+  import.meta.env.VITE_ONEDESK_ADMIN_EMAIL || "murthy@topin.co.in"
+).trim().toLowerCase();
+
+export function roleForEmail(email: string): UserRole {
+  return email.trim().toLowerCase() === ONEDESK_ADMIN_EMAIL ? "admin" : "requester";
+}
+
 export interface AppUser {
   uid: string;
   displayName: string;

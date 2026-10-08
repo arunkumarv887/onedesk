@@ -1,4 +1,5 @@
 import { ExcelWorkbookDatabase } from "./excelDb";
+import { roleForEmail } from "./types";
 import type {
   AppNotification,
   AppUser,
@@ -78,7 +79,10 @@ export class ExcelDatabase {
   }
 
   getMembers(): Member[] {
-    return this.users.getMembers();
+    return this.users.getMembers().map((member) => ({
+      ...member,
+      role: roleForEmail(member.email),
+    }));
   }
 
   getNotifications(user: AppUser): AppNotification[] {
@@ -95,11 +99,33 @@ export class ExcelDatabase {
 
   async ensureUser(user: AppUser): Promise<void> {
     const members = this.users.getMembers();
-    if (members.some((member) => member.email.toLowerCase() === user.email.toLowerCase())) return;
-    const role: UserRole = members.length === 0 ? "admin" : "requester";
+    for (const member of members) {
+      const role = roleForEmail(member.email);
+      if (member.role === role) continue;
+      await this.users.updateMember(member, role);
+      await this.incidents.addAudit(
+        "Member",
+        member.uid,
+        "",
+        user,
+        "role-policy-enforced",
+        JSON.stringify({ previousRole: member.role, role }),
+      );
+    }
+    const existing = this.users.getMembers().find(
+      (member) => member.email.trim().toLowerCase() === user.email.trim().toLowerCase(),
+    );
+    const role = roleForEmail(user.email);
+    if (existing?.role === role) return;
     const memberId = await this.users.addMember(user.email, user.displayName, role);
-    await this.incidents.addAudit("Member", memberId, "", user, "user-registered", JSON.stringify({ role }));
-    this.users.schemaChanged = true;
+    await this.incidents.addAudit(
+      "Member",
+      memberId,
+      "",
+      user,
+      existing ? "role-policy-enforced" : "user-registered",
+      JSON.stringify(existing ? { previousRole: existing.role, role } : { role }),
+    );
   }
 
   async addTicket(ticket: Ticket, actor: AppUser): Promise<void> {
@@ -118,14 +144,10 @@ export class ExcelDatabase {
     await this.incidents.updateAsset(asset, status, actor);
   }
 
-  async addMember(email: string, name: string, role: UserRole, actor: AppUser): Promise<void> {
-    const memberId = await this.users.addMember(email, name, role);
-    await this.incidents.addAudit("Member", memberId, "", actor, "role-updated", JSON.stringify({ role }));
-  }
-
-  async updateMember(member: Member, role: UserRole, actor: AppUser): Promise<void> {
-    await this.users.updateMember(member, role);
-    await this.incidents.addAudit("Member", member.uid, "", actor, "role-updated", JSON.stringify({ role }));
+  async addMember(email: string, name: string, actor: AppUser): Promise<void> {
+    const enforcedRole = roleForEmail(email);
+    const memberId = await this.users.addMember(email, name, enforcedRole);
+    await this.incidents.addAudit("Member", memberId, "", actor, "role-updated", JSON.stringify({ role: enforcedRole }));
   }
 
   async addNotification(notification: AppNotification): Promise<void> {

@@ -516,6 +516,14 @@ tbody tr:hover { background: #fafcf9; }
 .login-help { margin-top: 30px; padding-top: 16px; color: #97a19a; border-top: 1px solid #edf0ed; font-size: 9px; }
 .login-help a { display: inline-flex; align-items: center; gap: 2px; margin-left: 3px; color: #317144; text-decoration: none; font-weight: 600; }
 .login-help a:hover { text-decoration: underline; }
+.auth-mode-link { padding: 0; color: #317144; border: 0; background: none; font-size: inherit; font-weight: 600; }
+.auth-mode-link:hover { text-decoration: underline; }
+.registration-details { display: grid; gap: 13px; margin-top: 20px; }
+.registration-details > div { display: flex; align-items: flex-start; gap: 9px; }
+.registration-details > div > svg { flex: 0 0 auto; margin-top: 1px; color: #5f9c6e; }
+.registration-details strong, .registration-details small { display: block; }
+.registration-details strong { color: #4d5a51; font-size: 9px; font-weight: 600; }
+.registration-details small { margin-top: 3px; color: #98a29b; font-size: 8px; line-height: 1.5; }
 .login-footer { width: min(100%,385px); padding-top: 30px; margin-top: auto; color: #a1aaa3; font-size: 8px; }
 .login-footer span { margin: 0 5px; color: #c3cac4; }
 

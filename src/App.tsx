@@ -65,8 +65,13 @@ import type {
 type Page = "Dashboard" | "Incidents" | "Requests" | "Assets" | "Knowledge" | "Reports" | "Members" | "Settings";
 type Toast = { kind: "success" | "error" | "info"; message: string };
 
-const DEFAULT_INCIDENTS_WORKBOOK_URL = "https://topin1-my.sharepoint.com/:x:/r/personal/murthy_topin_co_in/Documents/itsm.xlsx?d=wc2d5d278b6ea4c409c98cb38cc747c7a&csf=1&web=1&e=yzb38d";
-const DEFAULT_USERS_WORKBOOK_URL = "https://topin1-my.sharepoint.com/:x:/r/personal/murthy_topin_co_in/Documents/users.xlsx?d=w884fdeffee7f405aab6272429b42d34c&csf=1&web=1&e=L1kQI0";
+const incidentsWorkbookUrl = import.meta.env.VITE_INCIDENTS_WORKBOOK_URL?.trim() || "";
+const usersWorkbookUrl = import.meta.env.VITE_USERS_WORKBOOK_URL?.trim() || "";
+const tenantIdConfigured = Boolean(
+  import.meta.env.VITE_AZURE_TENANT_ID?.trim()
+  || import.meta.env.VITE_MICROSOFT_TENANT_ID?.trim(),
+);
+const clientIdConfigured = Boolean(import.meta.env.VITE_MICROSOFT_CLIENT_ID?.trim());
 
 const navigation: { label: Page; icon: typeof LayoutDashboard; group: string }[] = [
   { label: "Dashboard", icon: LayoutDashboard, group: "WORKSPACE" },
@@ -137,6 +142,7 @@ function App() {
   const [dataVersion, setDataVersion] = useState(0);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [page, setPage] = useState<Page>("Dashboard");
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -169,7 +175,6 @@ function App() {
   const [memberForm, setMemberForm] = useState({
     email: "",
     name: "",
-    role: "requester" as UserRole,
   });
   const [assetForm, setAssetForm] = useState({
     name: "",
@@ -202,8 +207,9 @@ function App() {
 
   useEffect(() => {
     if (!user || database || autoConnectAttempted.current) return;
+    if (!incidentsWorkbookUrl || !usersWorkbookUrl) return;
     autoConnectAttempted.current = true;
-    void connectSharePointWorkbook(DEFAULT_INCIDENTS_WORKBOOK_URL, DEFAULT_USERS_WORKBOOK_URL);
+    void connectSharePointWorkbook(incidentsWorkbookUrl, usersWorkbookUrl);
   }, [user, database]);
 
   useEffect(() => {
@@ -609,25 +615,14 @@ function App() {
     }
     setBusy(true);
     try {
-      await database.addMember(email, memberForm.name.trim() || email.split("@")[0], memberForm.role, user);
+      await database.addMember(email, memberForm.name.trim() || email.split("@")[0], user);
       await commitDatabaseChanges(database);
-      setMemberForm({ email: "", name: "", role: "requester" });
+      setMemberForm({ email: "", name: "" });
       setToast({ kind: "success", message: "Workspace membership saved." });
     } catch (error) {
       setToast({ kind: "error", message: `Membership could not be saved: ${friendlyError(error)}` });
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function changeMemberRole(member: Member, nextRole: UserRole) {
-    if (!database || !isAdmin || !user) return;
-    try {
-      await database.updateMember(member, nextRole, user);
-      await commitDatabaseChanges(database);
-      setToast({ kind: "success", message: `${member.email} is now a ${nextRole}.` });
-    } catch (error) {
-      setToast({ kind: "error", message: `Member role could not be updated: ${friendlyError(error)}` });
     }
   }
 
@@ -722,7 +717,13 @@ function App() {
     return <ConfigurationScreen />;
   }
   if (!user) {
-    return <LoginScreen busy={busy} error={authError} onLogin={() => void handleMicrosoftLogin()} />;
+    return <LoginScreen
+      mode={authMode}
+      busy={busy}
+      error={authError}
+      onLogin={() => void handleMicrosoftLogin()}
+      onModeChange={setAuthMode}
+    />;
   }
   if (!database) {
     return <WorkbookConnectionScreen
@@ -867,7 +868,7 @@ function App() {
           {page === "Assets" && isAgent && <AssetList assets={assets} onCreate={() => setModal("asset")} onStatus={changeAssetStatus} />}
           {page === "Knowledge" && <KnowledgePage search={articleSearch} onSearch={setArticleSearch} articles={filteredArticles} onSelectArticle={setSelectedArticle} onCreateTicket={() => { setTicketForm((form) => ({ ...form, kind: "Service request" })); setModal("ticket"); }} />}
           {page === "Reports" && isAgent && <ReportsPage tickets={tickets} incidents={incidents} requests={requests} assets={assets} onExport={exportCsv} />}
-          {page === "Members" && isAdmin && <MembersPage members={members} form={memberForm} busy={busy} currentEmail={user.email} onFormChange={setMemberForm} onSave={saveMember} onRoleChange={changeMemberRole} />}
+          {page === "Members" && isAdmin && <MembersPage members={members} form={memberForm} busy={busy} currentEmail={user.email} onFormChange={setMemberForm} onSave={saveMember} />}
           {page === "Settings" && <SettingsPage user={user} role={role} database={database} onChangeWorkbook={disconnectWorkbook} busy={busy} emailConfigured={emailNotificationsConfigured} onTestEmail={() => void testOutlook()} />}
         </div>
         <footer className="main-footer"><span>© 2026 Onedesk · Topin Technologies</span><span><i /> Secure connection</span><span>Built for better work <Sparkles size={12} /></span></footer>
@@ -925,7 +926,24 @@ function App() {
 }
 
 function ConfigurationScreen() {
-  return <div className="config-screen"><div className="config-card"><div className="brand-mark"><span>T</span><i /></div><span className="eyebrow">MICROSOFT SETUP</span><h1>Connect your tenant</h1><p>Microsoft Entra sign-in needs the public application (client) ID and your tenant ID.</p><div className="config-steps"><div><span>1</span><div><strong>Set the Entra tenant ID</strong><code>VITE_AZURE_TENANT_ID=eb08a3d5-e471-41da-9175-aa010ac2680c</code></div></div><div><span>2</span><div><strong>Set the Entra application client ID</strong><code>VITE_MICROSOFT_CLIENT_ID=&lt;application-client-id&gt;</code></div></div><div><span>3</span><div><strong>Register the browser application</strong><small>Add this site's URL as a Single-page application redirect URI in Microsoft Entra.</small></div></div><div><span>4</span><div><strong>Grant the required permissions</strong><small>Add User.Read and Files.ReadWrite.All to Microsoft Graph, and Notifications.Send to the Notifications API.</small></div></div></div><p className="config-foot"><ShieldCheck size={15} /> The tenant ID is configured. Add the app registration's client ID to .env.local, then restart the dev server.</p></div></div>;
+  const missingSettings = [
+    !tenantIdConfigured && "VITE_AZURE_TENANT_ID (or VITE_MICROSOFT_TENANT_ID)",
+    !clientIdConfigured && "VITE_MICROSOFT_CLIENT_ID",
+  ].filter(Boolean);
+
+  return <div className="config-screen">
+    <div className="config-card">
+      <div className="brand-mark"><span>O</span><i /></div>
+      <span className="eyebrow">MICROSOFT SETUP</span>
+      <h1>Connect your tenant</h1>
+      <p>Microsoft Entra sign-in needs your tenant ID and application client ID.</p>
+      <div className="config-steps">
+        <div><span>{tenantIdConfigured ? <Check size={13} /> : "1"}</span><div><strong>Topin tenant ID</strong><small>{tenantIdConfigured ? "Configured" : "Add the Topin tenant ID to .env.local."}</small></div></div>
+        <div><span>{clientIdConfigured ? <Check size={13} /> : "2"}</span><div><strong>Application client ID</strong><small>{clientIdConfigured ? "Configured" : "Add the app registration client ID to .env.local."}</small></div></div>
+      </div>
+      <p className="config-foot"><ShieldCheck size={15} />{missingSettings.length ? <>Missing: <code>{missingSettings.join(", ")}</code>. Restart the dev server after updating .env.local.</> : "Configuration is complete. Restart the dev server to enable sign-in."}</p>
+    </div>
+  </div>;
 }
 
 function WorkbookConnectionScreen({ user, error, busy, onSharePoint, onLocalFiles, onCreate, onSignOut }: {
@@ -939,8 +957,8 @@ function WorkbookConnectionScreen({ user, error, busy, onSharePoint, onLocalFile
 }) {
   const [incidentsFile, setIncidentsFile] = useState<File | null>(null);
   const [usersFile, setUsersFile] = useState<File | null>(null);
-  const [incidentsUrl, setIncidentsUrl] = useState(DEFAULT_INCIDENTS_WORKBOOK_URL);
-  const [usersUrl, setUsersUrl] = useState(DEFAULT_USERS_WORKBOOK_URL);
+  const [incidentsUrl, setIncidentsUrl] = useState(incidentsWorkbookUrl);
+  const [usersUrl, setUsersUrl] = useState(usersWorkbookUrl);
 
   return <div className="config-screen workbook-screen"><section className="config-card workbook-connect-card">
     <div className="workbook-connect-top"><div className="brand-mark"><span>T</span><i /></div><button className="text-button" onClick={onSignOut}><LogOut size={14} /> Sign out</button></div>
@@ -962,21 +980,40 @@ function WorkbookConnectionScreen({ user, error, busy, onSharePoint, onLocalFile
   </section></div>;
 }
 
-function LoginScreen({ busy, error, onLogin }: { busy: boolean; error: string; onLogin: () => void }) {
+function LoginScreen({ mode, busy, error, onLogin, onModeChange }: {
+  mode: "login" | "register";
+  busy: boolean;
+  error: string;
+  onLogin: () => void;
+  onModeChange: (mode: "login" | "register") => void;
+}) {
+  const registering = mode === "register";
+
   return <div className="login-screen">
     <section className="login-brand">
       <div className="brand"><div className="brand-mark"><span>O</span><i /></div><div className="brand-name">Onedesk<span>IT SERVICE DESK</span></div></div>
-      <div className="login-brand-copy"><span className="eyebrow light">YOUR WORK, IN FLOW</span><h1>Technology that<br />keeps you moving.</h1><p>One place for incidents, service requests, assets, and answers.</p></div>
+      <div className="login-brand-copy"><span className="eyebrow light">{registering ? "WELCOME TO ONEDESK" : "YOUR WORK, IN FLOW"}</span><h1>{registering ? <>Your support<br />starts here.</> : <>Technology that<br />keeps you moving.</>}</h1><p>One place for incidents, service requests, assets, and answers.</p></div>
       <div className="login-brand-bottom"><span><ShieldCheck size={15} /> Topin Technologies</span><span>Powered by Microsoft</span></div>
       <div className="login-art"><div /><div /><div /></div>
     </section>
     <section className="login-panel"><div className="login-panel-inner">
-      <span className="eyebrow">WELCOME BACK</span><h2>Your support starts here.</h2><p>Sign in with your company Microsoft account to access the IT workspace.</p>
+      <span className="eyebrow">{registering ? "NEW TO ONEDESK" : "WELCOME BACK"}</span>
+      <h2>{registering ? "Create your workspace profile." : "Your support starts here."}</h2>
+      <p>{registering
+        ? "Continue with your organization-issued Microsoft account. On your first workbook connection, Onedesk adds your verified profile to the workspace."
+        : "Sign in with your company Microsoft account to access the IT workspace."}</p>
       {error && <div className="inline-alert error-alert"><CircleHelp size={16} /><span>{error}</span></div>}
       <button className="microsoft-button" disabled={busy} onClick={onLogin}><MicrosoftMark />{busy ? "Redirecting to Microsoft..." : "Continue with Microsoft"}<ArrowUpRight size={16} /></button>
+      {registering && <div className="registration-details">
+        <div><Check size={14} /><span><strong>Verified work identity</strong><small>Your name and email come from Microsoft; Onedesk never stores a password.</small></span></div>
+        <div><Check size={14} /><span><strong>Requester access by default</strong><small>Only murthy@topin.co.in has administrator access.</small></span></div>
+        <div><ShieldCheck size={14} /><span><strong>Workspace access is managed separately</strong><small>You also need permission to open the team's SharePoint workbooks.</small></span></div>
+      </div>}
       <div className="login-divider"><span>SECURE COMPANY ACCESS</span></div>
-      <div className="login-assurance"><div><ShieldCheck size={17} /><span><strong>Protected by your organization</strong><small>Your account is verified by Microsoft Entra ID.</small></span></div><div><Mail size={17} /><span><strong>Outlook notifications</strong><small>Ticket updates arrive right in your inbox.</small></span></div></div>
-      <div className="login-help">Need help signing in? Contact your IT administrator.</div>
+      {!registering && <div className="login-assurance"><div><ShieldCheck size={17} /><span><strong>Protected by your organization</strong><small>Your account is verified by Microsoft Entra ID.</small></span></div><div><Mail size={17} /><span><strong>Outlook notifications</strong><small>Ticket updates arrive right in your inbox.</small></span></div></div>}
+      <div className="login-help">{registering
+        ? <>Already registered? <button className="auth-mode-link" onClick={() => onModeChange("login")}>Sign in</button></>
+        : <>New to Onedesk? <button className="auth-mode-link" onClick={() => onModeChange("register")}>Register here</button><br />Need help signing in? Contact your IT administrator.</>}</div>
     </div><div className="login-footer">© 2026 Onedesk · Topin Technologies <span>·</span> Made for better work</div></section>
   </div>;
 }
@@ -1158,32 +1195,30 @@ function ReportsPage({ tickets, incidents, requests, assets, onExport }: { ticke
   </div>;
 }
 
-function MembersPage({ members, form, busy, currentEmail, onFormChange, onSave, onRoleChange }: {
+function MembersPage({ members, form, busy, currentEmail, onFormChange, onSave }: {
   members: Member[];
-  form: { email: string; name: string; role: UserRole };
+  form: { email: string; name: string };
   busy: boolean;
   currentEmail: string;
-  onFormChange: (value: { email: string; name: string; role: UserRole }) => void;
+  onFormChange: (value: { email: string; name: string }) => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
-  onRoleChange: (member: Member, role: UserRole) => void;
 }) {
   return <div className="members-page">
-    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> ACCESS MANAGEMENT</div><h1>Workspace members</h1><p>Assign service-desk roles to people who can access this workbook.</p></div><span className="member-count"><UsersRound size={15} /> {members.length} members</span></div>
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> ACCESS MANAGEMENT</div><h1>Workspace members</h1><p>Manage requester access to the service desk.</p></div><span className="member-count"><UsersRound size={15} /> {members.length} members</span></div>
     <div className="members-grid">
       <section className="panel member-add-panel">
-        <div className="panel-heading"><div><span className="panel-kicker">ADD OR UPDATE ACCESS</span><h2>Set a member's role</h2><p>Assign a role using the Microsoft account email.</p></div><span className="report-heading-icon"><UserRound size={16} /></span></div>
+        <div className="panel-heading"><div><span className="panel-kicker">ADD OR UPDATE ACCESS</span><h2>Add a requester</h2><p>Register a Microsoft account for workspace access.</p></div><span className="report-heading-icon"><UserRound size={16} /></span></div>
         <form className="member-form" onSubmit={onSave}>
           <label className="field full-field">Microsoft email<input required type="email" value={form.email} placeholder="employee@example.com" onChange={(event) => onFormChange({ ...form, email: event.target.value })} /></label>
           <label className="field">Display name<input value={form.name} placeholder="Employee name" onChange={(event) => onFormChange({ ...form, name: event.target.value })} /></label>
-          <label className="field">Workspace role<select value={form.role} onChange={(event) => onFormChange({ ...form, role: event.target.value as UserRole })}><option value="requester">Requester</option><option value="agent">IT agent</option><option value="admin">Administrator</option></select></label>
-          <div className="members-note"><ShieldCheck size={14} /><span>Roles are stored in this workbook. SharePoint file permissions are the security boundary—only grant edit access to trusted agents and admins.</span></div>
-          <button className="button primary" disabled={busy}><Plus size={15} />{busy ? "Saving..." : "Save membership"}</button>
+          <div className="members-note"><ShieldCheck size={14} /><span>Only murthy@topin.co.in has the administrator role. All other accounts are requesters; manage workbook permissions separately in SharePoint.</span></div>
+          <button className="button primary" disabled={busy}><Plus size={15} />{busy ? "Saving..." : "Save requester"}</button>
         </form>
       </section>
       <section className="panel member-list-panel">
-        <div className="panel-heading"><div><span className="panel-kicker">ONEDESK · TOPIN TECHNOLOGIES</span><h2>People with access</h2><p>Requesters see their own tickets; IT roles manage shared work.</p></div></div>
-        {members.length ? <div className="table-wrap"><table><thead><tr><th>Member</th><th>Role</th></tr></thead><tbody>{members.map((member) => <tr key={member.uid}><td><div className="person-cell"><span className="mini-avatar">{initials(member.name || member.email)}</span><span><strong className="member-name">{member.name || member.email}</strong><small className="member-email">{member.email}</small></span></div></td><td>{member.email.toLowerCase() === currentEmail.toLowerCase() ? <span className={`role-badge ${member.role}`}>{member.role} · you</span> : <select className={`member-role-select ${member.role}`} value={member.role} aria-label={`Role for ${member.email}`} onChange={(event) => onRoleChange(member, event.target.value as UserRole)}><option value="requester">Requester</option><option value="agent">IT agent</option><option value="admin">Administrator</option></select>}</td></tr>)}</tbody></table></div> : <EmptyState icon={UsersRound} title="No managed members yet" text="Add your first requester, IT agent, or administrator." />}
-        <div className="member-list-foot"><span><i className="role-dot requester" /> Requester</span><span><i className="role-dot agent" /> IT agent</span><span><i className="role-dot admin" /> Admin</span></div>
+        <div className="panel-heading"><div><span className="panel-kicker">ONEDESK · TOPIN TECHNOLOGIES</span><h2>People with access</h2><p>All members are requesters except the administrator account.</p></div></div>
+        {members.length ? <div className="table-wrap"><table><thead><tr><th>Member</th><th>Role</th></tr></thead><tbody>{members.map((member) => <tr key={member.uid}><td><div className="person-cell"><span className="mini-avatar">{initials(member.name || member.email)}</span><span><strong className="member-name">{member.name || member.email}</strong><small className="member-email">{member.email}</small></span></div></td><td><span className={`role-badge ${member.role}`}>{member.email.toLowerCase() === currentEmail.toLowerCase() ? `${member.role} · you` : member.role}</span></td></tr>)}</tbody></table></div> : <EmptyState icon={UsersRound} title="No managed members yet" text="Members are added when they sign in or when you save a requester." />}
+        <div className="member-list-foot"><span><i className="role-dot requester" /> Requester</span><span><i className="role-dot admin" /> Admin · murthy@topin.co.in</span></div>
       </section>
     </div>
   </div>;

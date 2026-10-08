@@ -28,24 +28,26 @@ Keep personal/user details and application roles in a **different** `.xlsx` file
 |---|---|---|
 | `Members` | Microsoft identity-to-ITSM role mapping | UserID, Email, Name, Role, CreatedAt, UpdatedAt |
 
-The first Microsoft account to connect when `Members` is empty is added as the initial administrator. Every subsequent Microsoft account is added to `Members` as a requester by default; administrators can promote users to `agent` or `admin`. Workbook-stored roles only control the app interface, not security: SharePoint permissions are the actual access boundary. Restrict both files to authorized users, and enable SharePoint version history/backups.
+The account configured in `VITE_ONEDESK_ADMIN_EMAIL` (default `murthy@topin.co.in`) receives the administrator role. Every other account is a requester; the app does not allow other members to be promoted to agent or admin. On connection, Onedesk corrects existing workbook roles to this policy. Workbook-stored roles only control the app interface, not security: SharePoint permissions are the actual access boundary. Restrict both files to authorized users, and enable SharePoint version history/backups.
+
+New users can choose **Register here** on the sign-in page and continue with their work or school Microsoft account after an administrator invites them as a guest (Entra B2B) in the Topin tenant. On first connection to the workbooks, Onedesk creates their member profile from their verified Microsoft identity; no separate Onedesk password is created. Registration does not create the guest invitation or grant access to SharePoint: invite the user in Entra, then grant the guest the required permissions to both workbooks. All accounts except the configured administrator receive the requester role, including when they are the first account in an empty `Members` table.
 
 The app adds missing sheets/tables to selected workbooks, but rejects sheets or tables with incompatible existing columns rather than silently discarding records. You can select both `.xlsx` files at startup or create and download a blank pair of workbooks.
 
 ## Configure Microsoft and SharePoint
 
-1. Create a Microsoft Entra **single-tenant** application registration.
+1. Configure the SPA app registration as a **single-tenant** app for the Topin directory. External users sign in as guests in this resource tenant; do not use the `organizations` authority for this guest-only setup.
 2. Add a **Single-page application** redirect URI for each app origin, including exactly `http://localhost:5173` for local development and the deployed HTTPS origin. Do not create or embed a client secret in this browser app.
 3. Add Microsoft Graph delegated permissions:
    - `User.Read` for the signed-in user's profile
    - `Files.ReadWrite.All` for both SharePoint workbooks
    The browser app does not need Graph `Mail.Send`; notifications are sent by the server-side Azure Function.
-4. Grant any administrator consent required by the tenant.
+4. Grant any administrator consent required by the tenant. Invite each external user as an Entra B2B guest into Topin, have them redeem the invitation, then grant the guest permission to both workbooks and confirm they can open and edit the files in SharePoint. Signing in to Onedesk by itself does not provision a guest or grant workbook access.
    Sign-in uses a full-page Microsoft redirect (not a popup). On return, the app processes the redirect response and restores the signed-in account.
-5. Copy `.env.example` to `.env.local` and set `VITE_MICROSOFT_CLIENT_ID` to the app registration's **Application (client) ID**.
+5. Copy `.env.example` to `.env.local`, set `VITE_AZURE_TENANT_ID` to the **Topin directory (tenant) ID**, and set `VITE_MICROSOFT_CLIENT_ID` to the SPA app registration's **Application (client) ID**. Set `VITE_INCIDENTS_WORKBOOK_URL` and `VITE_USERS_WORKBOOK_URL` to the SharePoint URLs for the incidents and user-details workbooks.
 6. Run `npm install` and `npm run dev`, then open `http://localhost:5173` (not `127.0.0.1` or another port). Vite is pinned to port 5173 and will report an error if that port is occupied rather than silently choosing a different redirect URI.
 
-`VITE_AZURE_TENANT_ID` is the tenant ID, not the application client ID. Browser environment variables are public; never put secrets in `VITE_` variables. After Microsoft sign-in, Onedesk automatically connects to the configured `itsm.xlsx` and `users.xlsx` SharePoint workbooks. Microsoft Graph still checks the signed-in account's permissions for both files.
+The SPA uses the Topin tenant ID as its sign-in authority. This lets invited external users authenticate in the directory where the SPA and SharePoint workbooks exist; an external user's home-tenant authority can instead produce `AADSTS700016` because the SPA is not registered there. Browser environment variables are public; never put secrets in `VITE_` variables. When both workbook URLs are set, Onedesk automatically connects after sign-in. If either URL is missing, enter the workbook URLs on the connection screen. Microsoft Graph still checks the signed-in account's permissions for both files.
 
 ## Configure the server-side email sender
 

@@ -5,7 +5,10 @@ import {
 } from "@azure/msal-browser";
 import type { AppUser } from "./types";
 
-const tenantId = import.meta.env.VITE_AZURE_TENANT_ID?.trim();
+const tenantId = (
+  import.meta.env.VITE_AZURE_TENANT_ID
+  || import.meta.env.VITE_MICROSOFT_TENANT_ID
+)?.trim();
 const clientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID?.trim();
 const emailApiScope = import.meta.env.VITE_EMAIL_API_SCOPE?.trim();
 const emailApiUrl = import.meta.env.VITE_EMAIL_API_URL?.trim();
@@ -41,7 +44,7 @@ function queueInteractive<T>(operation: () => Promise<T>): Promise<T> {
 
 async function ready(): Promise<PublicClientApplication> {
   if (!client) {
-    throw new Error("Configure VITE_MICROSOFT_CLIENT_ID and VITE_AZURE_TENANT_ID to enable Microsoft sign-in.");
+    throw new Error("Configure VITE_AZURE_TENANT_ID and VITE_MICROSOFT_CLIENT_ID to enable Microsoft sign-in.");
   }
   initialization ??= client.initialize().then(async () => {
     let redirectAccount: AccountInfo | null = null;
